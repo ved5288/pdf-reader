@@ -1,5 +1,5 @@
 import streamlit as st
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import pickle
 from PyPDF2 import PdfReader
 from streamlit_extras.add_vertical_space import add_vertical_space
@@ -25,7 +25,7 @@ with st.sidebar:
     add_vertical_space(5)
     st.write('Made with ❤️ by [Prompt Engineer](https://youtube.com/@engineerprompt)')
  
-load_dotenv()
+# load_dotenv()
 
 def main():
     st.header("Chat with PDF 💬")
@@ -74,7 +74,7 @@ def main():
         if query:
             docs = VectorStore.similarity_search(query=query, k=3)
  
-            llm = OpenAI(model_name='gpt-3.5-turbo')
+            llm = OpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo')
             # llm = OpenAI()
             chain = load_qa_chain(llm=llm, chain_type="stuff")
             with get_openai_callback() as cb:
