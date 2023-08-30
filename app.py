@@ -24,11 +24,23 @@ with st.sidebar:
     add_vertical_space(5)
     st.write('Made with ❤️ by [Vedant Somani](https://www.linkedin.com/in/vedantsomani/)')
  
-# load_dotenv()
+def get_response_for_query(vector_store, query):
+    docs = vector_store.similarity_search(query=query, k=3)
+ 
+    llm = OpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo')
+    # llm = OpenAI()
+    chain = load_qa_chain(llm=llm, chain_type="stuff")
+    with get_openai_callback() as cb:
+        response = chain.run(input_documents=docs, question=query)
+        return response
+    return "Something went wrong while processing your request. Please contact the author."
 
 def main():
     st.header("Chat with your document 💬")
- 
+
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
  
     # upload a PDF file
     pdf = st.file_uploader("Upload your PDF", type='pdf')
@@ -50,8 +62,6 @@ def main():
  
         # # embeddings
         store_name = pdf.name[:-4]
-        st.write(f'{store_name}')
-        # st.write(chunks)
  
         if os.path.exists(f"{store_name}.pkl"):
             with open(f"{store_name}.pkl", "rb") as f:
@@ -62,24 +72,25 @@ def main():
             VectorStore = FAISS.from_texts(chunks, embedding=embeddings)
             with open(f"{store_name}.pkl", "wb") as f:
                 pickle.dump(VectorStore, f)
+
+        # Display chat messages from history on app rerun
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
  
-        # embeddings = OpenAIEmbeddings()
-        # VectorStore = FAISS.from_texts(chunks, embedding=embeddings)
- 
-        # Accept user questions/query
-        query = st.text_input("Ask questions about your PDF file:")
-        # st.write(query)
- 
-        if query:
-            docs = VectorStore.similarity_search(query=query, k=3)
- 
-            llm = OpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo')
-            # llm = OpenAI()
-            chain = load_qa_chain(llm=llm, chain_type="stuff")
-            with get_openai_callback() as cb:
-                response = chain.run(input_documents=docs, question=query)
-                print(cb)
-            st.write(response)
+        # React to user input
+        if prompt := st.chat_input("What do you want to know from the PDF?"):
+            # Display user message in chat message container
+            st.chat_message("user").markdown(prompt)
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": prompt})
+
+            response = get_response_for_query(VectorStore, prompt)
+            # Display assistant response in chat message container
+            with st.chat_message("assistant"):
+                st.markdown(response)
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
  
 if __name__ == '__main__':
     main()
