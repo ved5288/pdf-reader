@@ -1,6 +1,6 @@
 import streamlit as st
 import pickle
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, PdfWriter
 from streamlit_extras.add_vertical_space import add_vertical_space
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -11,6 +11,7 @@ from langchain.callbacks import get_openai_callback
 import os
 
 from gsheet import push_messages_to_sheet
+import boto3
  
 # Sidebar contents
 with st.sidebar:
@@ -46,30 +47,47 @@ def main():
  
     # upload a PDF file
     pdf = st.file_uploader("Upload your PDF", type='pdf')
- 
-    # st.write(pdf)
+
     if pdf is not None:
-        pdf_reader = PdfReader(pdf)
-        
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() 
- 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len
-            )
-        chunks = text_splitter.split_text(text=text)
- 
-        # # embeddings
+
+        # Check if embeddings already exist.
         store_name = pdf.name[:-4]
- 
+
         if os.path.exists(f"{store_name}.pkl"):
             with open(f"{store_name}.pkl", "rb") as f:
+                # Embeddings loaded from disk.
                 VectorStore = pickle.load(f)
-            # st.write('Embeddings Loaded from the Disk')s
         else:
+            # Embeddings don't exist. Create the embeddings
+
+            pdf_reader = PdfReader(pdf)
+            pdf_writer = PdfWriter()
+            text = ""
+            for page in pdf_reader.pages:
+                pdf_writer.add_page(page)
+                text += page.extract_text() 
+
+            # Save pdf file to local disk
+            new_file = open(pdf.name, "wb")
+            pdf_writer.write(new_file)
+            new_file.close()
+
+            session = boto3.Session(
+                aws_access_key_id = st.secrets["AWS_ACCESS_KEY_ID"],
+                aws_secret_access_key = st.secrets["AWS_SECRET_ACCESS_KEY"],
+            )
+            s3 = session.resource('s3')
+            s3.meta.client.upload_file(Filename=pdf.name, Bucket=st.secrets["S3_PDFREADER_BUCKETNAME"], Key=pdf.name)
+
+            os.remove(pdf.name)
+
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len
+                )
+            chunks = text_splitter.split_text(text=text)
+            
             embeddings = OpenAIEmbeddings()
             VectorStore = FAISS.from_texts(chunks, embedding=embeddings)
             with open(f"{store_name}.pkl", "wb") as f:
@@ -88,7 +106,7 @@ def main():
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             response = get_response_for_query(VectorStore, prompt)
-            push_messages_to_sheet("TEST", prompt, response)
+            push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + pdf.name, prompt, response)
             # Display assistant response in chat message container
             with st.chat_message("assistant"):
                 st.markdown(response)
