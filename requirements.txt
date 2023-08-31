@@ -6,3 +6,5 @@ streamlit-extras
 altair==4.0
 openai
 tiktoken
+gspread
+oauth2client

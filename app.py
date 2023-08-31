@@ -9,6 +9,8 @@ from langchain.llms import OpenAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.callbacks import get_openai_callback
 import os
+
+from gsheet import push_messages_to_sheet
  
 # Sidebar contents
 with st.sidebar:
@@ -86,6 +88,7 @@ def main():
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             response = get_response_for_query(VectorStore, prompt)
+            push_messages_to_sheet("TEST", prompt, response)
             # Display assistant response in chat message container
             with st.chat_message("assistant"):
                 st.markdown(response)
