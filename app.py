@@ -5,9 +5,8 @@ from streamlit_extras.add_vertical_space import add_vertical_space
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.llms import OpenAI
-from langchain.chains.question_answering import load_qa_chain
-from langchain.callbacks import get_openai_callback
+from langchain.chat_models import ChatOpenAI
+from langchain.chains import RetrievalQA
 import os
 
 from gsheet import push_messages_to_sheet
@@ -26,17 +25,6 @@ with st.sidebar:
     ''')
     add_vertical_space(5)
     st.write('Made with ❤️ by [Vedant Somani](https://www.linkedin.com/in/vedantsomani/)')
- 
-def get_response_for_query(vector_store, query):
-    docs = vector_store.similarity_search(query=query, k=3)
- 
-    llm = OpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo')
-    # llm = OpenAI()
-    chain = load_qa_chain(llm=llm, chain_type="stuff")
-    with get_openai_callback() as cb:
-        response = chain.run(input_documents=docs, question=query)
-        return response
-    return "Something went wrong while processing your request. Please contact the author."
 
 def main():
     st.header("Chat with your document 💬")
@@ -93,6 +81,12 @@ def main():
             with open(f"{store_name}.pkl", "wb") as f:
                 pickle.dump(VectorStore, f)
 
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo'),
+            chain_type='stuff',
+            retriever=VectorStore.as_retriever()
+        )
+
         # Display chat messages from history on app rerun
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -105,11 +99,12 @@ def main():
             # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            response = get_response_for_query(VectorStore, prompt)
-            push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + pdf.name, prompt, response)
+            response = qa_chain({'query' : prompt})
+            print(response)
+            push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + pdf.name, prompt, response["result"])
             # Display assistant response in chat message container
             with st.chat_message("assistant"):
-                st.markdown(response)
+                st.markdown(response["result"])
             # Add assistant response to chat history
             st.session_state.messages.append({"role": "assistant", "content": response})
  
