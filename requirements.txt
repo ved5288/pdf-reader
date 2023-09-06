@@ -1,4 +1,4 @@
-langchain==0.0.154
+langchain
 PyPDF2==3.0.1
 streamlit
 faiss-cpu==1.7.4
