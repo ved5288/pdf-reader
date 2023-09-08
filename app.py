@@ -33,7 +33,7 @@ with st.sidebar:
 
 
 class StreamHandler(BaseCallbackHandler):
-    def __init__(self, container: st.delta_generator.DeltaGenerator, query: str, source: str, initial_text: str = ""):
+    def __init__(self, container: st.delta_generator.DeltaGenerator, source: str, query: str, initial_text: str = ""):
         self.container = container
         self.text = initial_text
         self.run_id_ignore_token = None
@@ -52,6 +52,7 @@ class StreamHandler(BaseCallbackHandler):
         self.container.markdown(self.text)
 
     def on_llm_end(self, response: LLMResult, **kwargs) -> None:
+        print("Reached here")
         push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + self.source, self.query, self.text)
         
 
