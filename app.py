@@ -113,7 +113,7 @@ def main():
 
         # Setup LLM and QA chain
         qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo', streaming=True),
+            llm=ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo', streaming=True, temperature=0.5),
             retriever=VectorStore.as_retriever(),
             memory=memory
         )
