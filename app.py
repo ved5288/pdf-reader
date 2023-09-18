@@ -138,6 +138,8 @@ def generate_summary(pdf, message_history, llm):
 
     message_history.add_ai_message(summary)
 
+    push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + pdf.name, "summary-button", summary)
+
 
 def main():
     st.header("Chat with your document 💬")
