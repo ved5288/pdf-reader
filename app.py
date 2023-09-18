@@ -10,10 +10,11 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain.schema import LLMResult
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.memory import ConversationBufferMemory, StreamlitChatMessageHistory
-
+from langchain.chains.summarize import load_summarize_chain
+from langchain.docstore.document import Document
 
 import os
-
+import threading
 from gsheet import push_messages_to_sheet
 import boto3
  
@@ -90,9 +91,52 @@ def create_vector_embeddings(pdf):
     vector_store = FAISS.from_texts(chunks, embedding=embeddings)
     return vector_store
 
-def generate_summary(pdf, message_history):
+def create_group_summary(llm, index, docs, summaries):
+    summary_chain = load_summarize_chain(llm=llm, chain_type="map_reduce")
+    summary = summary_chain.run(docs)
+    summaries[index] = summary
+
+def generate_summary(pdf, message_history, llm):
     message_history.add_user_message("Summarize the document!")
-    message_history.add_ai_message("Hey here is the summary")
+
+    pdf_reader = PdfReader(pdf)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() 
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=100,
+        length_function=len
+    )
+    chunks = text_splitter.split_text(text=text)
+    num_chunks = len(chunks)
+    docs = [Document(page_content=t) for t in chunks]
+
+    group_chunks_count = 5
+    num_groups = int(num_chunks / group_chunks_count)
+    if not num_chunks % group_chunks_count == 0:
+        num_groups += 1
+    threads = []
+    summaries = [None] * num_groups
+    
+    with st.spinner('Generating summary. Takes a little bit of time. Please stay tuned .....'):
+        for i in range(num_groups):
+            start = group_chunks_count*i
+            if (group_chunks_count*(i+1) > num_chunks):
+                end = num_chunks
+            else:
+                end = group_chunks_count*(i+1)
+            thread = threading.Thread(target=create_group_summary, args=(llm, i, docs[start:end], summaries))
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads: 
+            thread.join()
+
+        summary = "\n\n".join(summaries)
+
+    message_history.add_ai_message(summary)
 
 
 def main():
@@ -120,10 +164,12 @@ def main():
         msgs = StreamlitChatMessageHistory()
         memory = ConversationBufferMemory(memory_key="chat_history", chat_memory=msgs, return_messages=True)
 
-        st.button("Summarize this document!", on_click=generate_summary, args=["temp", msgs])
-
-        # Setup LLM and QA chain
+        # Setup LLM
         llm = ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo', streaming=True, temperature=0.5)
+        
+        st.button("Summarize this document!", on_click=generate_summary, args=[pdf, msgs, llm])
+
+        # Setup QA chain
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
             retriever=vector_store.as_retriever(),
