@@ -55,6 +55,45 @@ class StreamHandler(BaseCallbackHandler):
         print("Reached here")
         push_messages_to_sheet("https://" + st.secrets["S3_PDFREADER_BUCKETNAME"] + ".s3.amazonaws.com/" + self.source, self.query, self.text)
         
+def create_vector_embeddings(pdf):
+    pdf_reader = PdfReader(pdf)
+    pdf_writer = PdfWriter()
+    text = ""
+    for page in pdf_reader.pages:
+        pdf_writer.add_page(page)
+        text += page.extract_text() 
+
+    # Save pdf file to local disk temporarily
+    new_file = open(pdf.name, "wb")
+    pdf_writer.write(new_file)
+    new_file.close()
+
+    # Upload file to S3 bucket
+    session = boto3.Session(
+        aws_access_key_id = st.secrets["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key = st.secrets["AWS_SECRET_ACCESS_KEY"],
+    )
+    s3 = session.resource('s3')
+    s3.meta.client.upload_file(Filename=pdf.name, Bucket=st.secrets["S3_PDFREADER_BUCKETNAME"], Key=pdf.name)
+
+    # Delete the temporary file
+    os.remove(pdf.name)
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len
+        )
+    chunks = text_splitter.split_text(text=text)
+    
+    embeddings = OpenAIEmbeddings()
+    vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+    return vector_store
+
+def generate_summary(pdf, message_history):
+    message_history.add_user_message("Summarize the document!")
+    message_history.add_ai_message("Hey here is the summary")
+
 
 def main():
     st.header("Chat with your document 💬")
@@ -70,51 +109,24 @@ def main():
         if os.path.exists(f"{store_name}.pkl"):
             with open(f"{store_name}.pkl", "rb") as f:
                 # Embeddings loaded from disk.
-                VectorStore = pickle.load(f)
+                vector_store = pickle.load(f)
         else:
-            # Embeddings don't exist. Create the embeddings
-
-            pdf_reader = PdfReader(pdf)
-            pdf_writer = PdfWriter()
-            text = ""
-            for page in pdf_reader.pages:
-                pdf_writer.add_page(page)
-                text += page.extract_text() 
-
-            # Save pdf file to local disk
-            new_file = open(pdf.name, "wb")
-            pdf_writer.write(new_file)
-            new_file.close()
-
-            session = boto3.Session(
-                aws_access_key_id = st.secrets["AWS_ACCESS_KEY_ID"],
-                aws_secret_access_key = st.secrets["AWS_SECRET_ACCESS_KEY"],
-            )
-            s3 = session.resource('s3')
-            s3.meta.client.upload_file(Filename=pdf.name, Bucket=st.secrets["S3_PDFREADER_BUCKETNAME"], Key=pdf.name)
-
-            os.remove(pdf.name)
-
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                length_function=len
-                )
-            chunks = text_splitter.split_text(text=text)
-            
-            embeddings = OpenAIEmbeddings()
-            VectorStore = FAISS.from_texts(chunks, embedding=embeddings)
+            # Create embeddings
+            vector_store = create_vector_embeddings(pdf)
             with open(f"{store_name}.pkl", "wb") as f:
-                pickle.dump(VectorStore, f)
-            
+                pickle.dump(vector_store, f)
+
         # Setup memory for contextual conversation
         msgs = StreamlitChatMessageHistory()
         memory = ConversationBufferMemory(memory_key="chat_history", chat_memory=msgs, return_messages=True)
 
+        st.button("Summarize this document!", on_click=generate_summary, args=["temp", msgs])
+
         # Setup LLM and QA chain
+        llm = ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo', streaming=True, temperature=0.5)
         qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=ChatOpenAI(openai_api_key = st.secrets["OPENAI_API_KEY"], model_name='gpt-3.5-turbo', streaming=True, temperature=0.5),
-            retriever=VectorStore.as_retriever(),
+            llm=llm,
+            retriever=vector_store.as_retriever(),
             memory=memory
         )
 
